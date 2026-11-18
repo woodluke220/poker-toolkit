@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/PokerToolkit.Engine/PokerToolkit.Engine.csproj" />
+    <Project Path="src/PokerToolkit.Web/PokerToolkit.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PokerToolkit.Engine.Tests/PokerToolkit.Engine.Tests.csproj" />
+  </Folder>
+</Solution>

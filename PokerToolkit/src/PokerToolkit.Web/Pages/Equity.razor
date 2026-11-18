@@ -1,0 +1,447 @@
+@page "/"
+@inject RangeStore Store
+
+<PageTitle>Equity · Poker Toolkit</PageTitle>
+
+<h1>Equity calculator</h1>
+<p class="lede">
+    Give each player a hand or a range, add any board cards, and see how often each one wins.
+</p>
+
+<div class="equity-layout">
+    <div class="equity-main">
+
+        <section class="panel">
+            <div class="panel-head">
+                <h2>Board</h2>
+                <button type="button" class="link" @onclick="ClearBoard">Clear</button>
+            </div>
+            <div class="slots">
+                @for (int i = 0; i < 5; i++)
+                {
+                    int slot = i;
+                    <CardSlot Value="_board[slot]" Active="IsActive(BoardSeat, slot)"
+                              OnClick="() => SelectSlot(BoardSeat, slot)" />
+                    @if (slot == 2 || slot == 3)
+                    {
+                        <span class="street-gap"></span>
+                    }
+                }
+            </div>
+        </section>
+
+        @for (int i = 0; i < _seats.Count; i++)
+        {
+            int index = i;
+            Seat seat = _seats[index];
+
+            <section class="panel">
+                <div class="panel-head">
+                    <h2>Player @(index + 1)</h2>
+                    <div class="segmented">
+                        <button type="button" class="@(seat.UseRange ? "" : "on")" @onclick="() => SetMode(seat, false)">Hand</button>
+                        <button type="button" class="@(seat.UseRange ? "on" : "")" @onclick="() => SetMode(seat, true)">Range</button>
+                    </div>
+                    @if (_seats.Count > 2)
+                    {
+                        <button type="button" class="link" @onclick="() => RemoveSeat(index)">Remove</button>
+                    }
+                </div>
+
+                @if (!seat.UseRange)
+                {
+                    <div class="slots">
+                        <CardSlot Value="seat.Cards[0]" Active="IsActive(index, 0)" OnClick="() => SelectSlot(index, 0)" />
+                        <CardSlot Value="seat.Cards[1]" Active="IsActive(index, 1)" OnClick="() => SelectSlot(index, 1)" />
+                        <span class="made-hand">@MadeHand(seat)</span>
+                    </div>
+                }
+                else
+                {
+                    <div class="range-row">
+                        <input class="text-input" value="@seat.RangeText" placeholder="e.g. TT+, AQs+, AKo"
+                               aria-label="Range for player @(index + 1)"
+                               @onchange="e => ApplyRangeText(seat, e.Value?.ToString())" />
+                        <button type="button" class="btn" @onclick="() => seat.ShowGrid = !seat.ShowGrid">
+                            @(seat.ShowGrid ? "Hide grid" : "Edit grid")
+                        </button>
+                    </div>
+
+                    <div class="chips">
+                        <button type="button" class="chip" @onclick="() => SetTopPercent(seat, 10)">Top 10%</button>
+                        <button type="button" class="chip" @onclick="() => SetTopPercent(seat, 20)">Top 20%</button>
+                        <button type="button" class="chip" @onclick="() => SetTopPercent(seat, 40)">Top 40%</button>
+                        <button type="button" class="chip" @onclick="() => SetTopPercent(seat, 100)">Any two cards</button>
+                        @foreach (KeyValuePair<string, string> saved in _saved)
+                        {
+                            string notation = saved.Value;
+                            <button type="button" class="chip saved" @onclick="() => ApplyRangeText(seat, notation)">@saved.Key</button>
+                        }
+                    </div>
+
+                    @if (seat.RangeError is not null)
+                    {
+                        <p class="error">@seat.RangeError</p>
+                    }
+                    else
+                    {
+                        <p class="hint">@seat.Range.ComboCount combos · @seat.Range.Percent.ToString("F1")% of hands</p>
+                    }
+
+                    @if (seat.ShowGrid)
+                    {
+                        <RangeGrid Range="seat.Range" Compact="true" OnChanged="() => GridChanged(seat)" />
+                    }
+                }
+
+                @if (_result is not null && index < _result.Players.Count)
+                {
+                    PlayerEquity equity = _result.Players[index];
+
+                    <div class="result">
+                        <div class="bar"><div class="fill" style="width: @((equity.Equity * 100).ToString("F2", CultureInfo.InvariantCulture))%"></div></div>
+                        <div class="result-numbers">
+                            <strong>@CardText.Percent(equity.Equity)</strong>
+                            <span>Win @CardText.Percent(equity.Win)</span>
+                            <span>Tie @CardText.Percent(equity.Tie)</span>
+                        </div>
+                    </div>
+                }
+            </section>
+        }
+
+        <div class="actions">
+            @if (_running)
+            {
+                <button type="button" class="btn primary" @onclick="() => _stopRequested = true">Stop</button>
+            }
+            else
+            {
+                <button type="button" class="btn primary" @onclick="CalculateAsync">Calculate</button>
+            }
+
+            <button type="button" class="btn" disabled="@(_seats.Count >= MaxSeats || _running)" @onclick="AddSeat">Add player</button>
+
+            <label class="inline-field">
+                Simulation size
+                <select @bind="_trialTarget">
+                    <option value="20000">20,000 (fast)</option>
+                    <option value="100000">100,000</option>
+                    <option value="500000">500,000 (precise)</option>
+                </select>
+            </label>
+        </div>
+
+        @if (_error is not null)
+        {
+            <p class="error">@_error</p>
+        }
+
+        @if (_result is not null)
+        {
+            <p class="hint">
+                @if (_result.IsExact)
+                {
+                    <text>Exact: every one of the @_result.Trials.ToString("N0") possible deals was counted.</text>
+                }
+                else
+                {
+                    <text>
+                        Simulated @_result.Trials.ToString("N0") random deals@(_running ? "…" : ".")
+                        Each figure is within about ±@CardText.Percent(_result.MarginOfError, 2) of the true value.
+                    </text>
+                }
+            </p>
+        }
+    </div>
+
+    <aside class="equity-side">
+        <section class="panel sticky">
+            <h2>Cards</h2>
+            <p class="hint">@ActiveSlotHint</p>
+            <CardPicker UsedMask="UsedMask" Disabled="_active is null" OnPick="PickCard" />
+        </section>
+    </aside>
+</div>
+
+@code {
+    private const int BoardSeat = -1;
+    private const int MaxSeats = 6;
+    private const int BatchSize = 2000;
+
+    /// <summary>What the page remembers about one player.</summary>
+    private sealed class Seat
+    {
+        public bool UseRange;
+        public Card?[] Cards = new Card?[2];
+        public HandRange Range = new();
+        public string RangeText = "";
+        public string? RangeError;
+        public bool ShowGrid;
+    }
+
+    private readonly List<Seat> _seats = new() { new Seat(), new Seat() };
+    private readonly Card?[] _board = new Card?[5];
+
+    // The slot the next picked card goes into: a seat number (or BoardSeat) and a position.
+    private (int Seat, int Slot)? _active = (0, 0);
+
+    private SortedDictionary<string, string> _saved = new();
+    private int _trialTarget = 100_000;
+
+    private EquityResult? _result;
+    private string? _error;
+    private bool _running;
+    private bool _stopRequested;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _saved = await Store.LoadAsync();
+    }
+
+    // ----- Card slots -----------------------------------------------------
+
+    private Card?[] SlotsFor(int seat) => seat == BoardSeat ? _board : _seats[seat].Cards;
+
+    private bool IsActive(int seat, int slot)
+        => _active is (int activeSeat, int activeSlot) && activeSeat == seat && activeSlot == slot;
+
+    private ulong UsedMask
+    {
+        get
+        {
+            ulong mask = 0;
+            foreach (Card? card in _board)
+                if (card is Card c) mask |= c.Mask;
+
+            foreach (Seat seat in _seats)
+            {
+                if (seat.UseRange) continue;
+                foreach (Card? card in seat.Cards)
+                    if (card is Card c) mask |= c.Mask;
+            }
+            return mask;
+        }
+    }
+
+    private string ActiveSlotHint
+    {
+        get
+        {
+            if (_active is not (int seat, int slot)) return "Select a card slot on the left, then choose a card.";
+            return seat == BoardSeat
+                ? $"Choosing board card {slot + 1}."
+                : $"Choosing card {slot + 1} for player {seat + 1}.";
+        }
+    }
+
+    private void SelectSlot(int seat, int slot)
+    {
+        // Clicking a filled slot empties it so it can be replaced.
+        Card?[] slots = SlotsFor(seat);
+        if (slots[slot] is not null)
+        {
+            slots[slot] = null;
+            ClearResult();
+        }
+        _active = (seat, slot);
+    }
+
+    private void PickCard(Card card)
+    {
+        if (_active is not (int seat, int slot)) return;
+
+        SlotsFor(seat)[slot] = card;
+        ClearResult();
+        MoveToNextEmptySlot(seat, slot);
+    }
+
+    /// <summary>After a pick, jump to the next empty slot so cards can be entered in a row.</summary>
+    private void MoveToNextEmptySlot(int seat, int slot)
+    {
+        var order = new List<(int Seat, int Slot)>();
+        for (int i = 0; i < _seats.Count; i++)
+        {
+            if (_seats[i].UseRange) continue;
+            order.Add((i, 0));
+            order.Add((i, 1));
+        }
+        for (int i = 0; i < 5; i++) order.Add((BoardSeat, i));
+
+        int current = order.IndexOf((seat, slot));
+        for (int step = 1; step <= order.Count; step++)
+        {
+            (int Seat, int Slot) next = order[(current + step) % order.Count];
+            if (SlotsFor(next.Seat)[next.Slot] is null)
+            {
+                _active = next;
+                return;
+            }
+        }
+        _active = null;
+    }
+
+    private void ClearBoard()
+    {
+        Array.Clear(_board);
+        _active = (BoardSeat, 0);
+        ClearResult();
+    }
+
+    // ----- Seats ----------------------------------------------------------
+
+    private void SetMode(Seat seat, bool useRange)
+    {
+        if (seat.UseRange == useRange) return;
+        seat.UseRange = useRange;
+        _active = null;
+        ClearResult();
+    }
+
+    private void AddSeat()
+    {
+        _seats.Add(new Seat());
+        ClearResult();
+    }
+
+    private void RemoveSeat(int index)
+    {
+        _seats.RemoveAt(index);
+        _active = null;
+        ClearResult();
+    }
+
+    private void ApplyRangeText(Seat seat, string? text)
+    {
+        seat.RangeText = text ?? "";
+        if (HandRange.TryParse(text, out HandRange range, out string? error))
+        {
+            seat.Range = range;
+            seat.RangeError = null;
+        }
+        else
+        {
+            seat.RangeError = error;
+        }
+        ClearResult();
+    }
+
+    private void SetTopPercent(Seat seat, double percent)
+    {
+        seat.Range = HandRange.TopPercent(percent);
+        GridChanged(seat);
+    }
+
+    private void GridChanged(Seat seat)
+    {
+        seat.RangeText = seat.Range.ToString();
+        seat.RangeError = null;
+        ClearResult();
+    }
+
+    /// <summary>Names the player's current hand once there is a flop, e.g. "Pair of Kings".</summary>
+    private string MadeHand(Seat seat)
+    {
+        if (seat.Cards[0] is not Card first || seat.Cards[1] is not Card second) return "";
+
+        ulong mask = first.Mask | second.Mask;
+        int boardCards = 0;
+        foreach (Card? card in _board)
+        {
+            if (card is Card c)
+            {
+                mask |= c.Mask;
+                boardCards++;
+            }
+        }
+        return boardCards >= 3 ? HandEvaluator.Describe(HandEvaluator.Evaluate(mask)) : "";
+    }
+
+    // ----- Calculation ----------------------------------------------------
+
+    private void ClearResult()
+    {
+        _result = null;
+        _error = null;
+    }
+
+    private EquityRequest BuildRequest()
+    {
+        var request = new EquityRequest();
+
+        foreach (Card? card in _board)
+            if (card is Card c) request.Board.Add(c);
+
+        if (request.Board.Count is 1 or 2)
+            throw new ArgumentException("A board has 0, 3, 4 or 5 cards. Finish the flop or clear it.");
+
+        for (int i = 0; i < _seats.Count; i++)
+        {
+            Seat seat = _seats[i];
+            if (seat.UseRange)
+            {
+                if (seat.RangeError is not null)
+                    throw new ArgumentException($"Player {i + 1}: fix the range text first.");
+                if (seat.Range.IsEmpty)
+                    throw new ArgumentException($"Player {i + 1}: choose at least one hand for the range.");
+                request.Players.Add(PlayerSpec.FromRange(seat.Range.Clone()));
+            }
+            else
+            {
+                if (seat.Cards[0] is not Card first || seat.Cards[1] is not Card second)
+                    throw new ArgumentException($"Player {i + 1}: pick both hole cards, or switch to a range.");
+                request.Players.Add(PlayerSpec.FromHand(first, second));
+            }
+        }
+        return request;
+    }
+
+    private async Task CalculateAsync()
+    {
+        ClearResult();
+
+        EquityRequest request;
+        try
+        {
+            request = BuildRequest();
+        }
+        catch (ArgumentException ex)
+        {
+            _error = ex.Message;
+            return;
+        }
+
+        _running = true;
+        _stopRequested = false;
+        try
+        {
+            if (EquityCalculator.EstimateExactWork(request) <= EquityCalculator.DefaultExactLimit)
+            {
+                // Small enough to count every deal.
+                _result = EquityCalculator.CalculateExact(request);
+            }
+            else
+            {
+                // Simulate in batches, pausing briefly between them so the page
+                // can redraw and the Stop button can be pressed.
+                var simulation = new MonteCarloSimulation(request);
+                while (simulation.Trials < _trialTarget && !_stopRequested)
+                {
+                    simulation.Run(BatchSize);
+                    _result = simulation.GetResult();
+                    StateHasChanged();
+                    await Task.Delay(1);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            _result = null;
+            _error = ex.Message;
+        }
+        finally
+        {
+            _running = false;
+        }
+    }
+}

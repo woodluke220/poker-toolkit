@@ -1,0 +1,30 @@
+@* One card position (a hole card or a board card). Shows the card, or a plus sign when empty. *@
+
+<button type="button" class="@CssClass" @onclick="OnClick">
+    @if (Value is Card card)
+    {
+        <span class="rank">@(card.RankChar)</span>
+        <span class="suit">@CardText.SuitSymbol(card)</span>
+    }
+    else
+    {
+        <span class="plus">+</span>
+    }
+</button>
+
+@code {
+    [Parameter] public Card? Value { get; set; }
+    [Parameter] public bool Active { get; set; }
+    [Parameter] public EventCallback OnClick { get; set; }
+
+    private string CssClass
+    {
+        get
+        {
+            string css = "slot";
+            if (Active) css += " active";
+            css += Value is Card card ? " " + CardText.SuitClass(card) : " blank";
+            return css;
+        }
+    }
+}

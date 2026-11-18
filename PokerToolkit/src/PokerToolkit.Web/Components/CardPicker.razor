@@ -1,0 +1,30 @@
+@* The 52-card grid used to fill whichever card slot is currently selected. *@
+
+<div class="card-picker">
+    @foreach (int suit in SuitOrder)
+    {
+        <div class="picker-row">
+            @for (int rank = 12; rank >= 0; rank--)
+            {
+                Card card = Card.From(rank, suit);
+                bool taken = (UsedMask & card.Mask) != 0;
+
+                <button type="button" class="@("pick " + CardText.SuitClass(card))" disabled="@(taken || Disabled)"
+                        @onclick="() => OnPick.InvokeAsync(card)">
+                    @(card.RankChar)<span>@CardText.SuitSymbol(card)</span>
+                </button>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private static readonly int[] SuitOrder = { 3, 2, 1, 0 };
+
+    /// <summary>Cards already in use somewhere; these are greyed out.</summary>
+    [Parameter] public ulong UsedMask { get; set; }
+
+    [Parameter] public bool Disabled { get; set; }
+
+    [Parameter] public EventCallback<Card> OnPick { get; set; }
+}

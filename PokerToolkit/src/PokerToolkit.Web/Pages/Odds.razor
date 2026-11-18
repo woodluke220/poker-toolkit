@@ -1,0 +1,196 @@
+@page "/odds"
+
+<PageTitle>Pot odds · Poker Toolkit</PageTitle>
+
+<h1>Pot odds and EV</h1>
+<p class="lede">
+    The arithmetic behind calling and betting. Use any unit you like (chips, dollars, big blinds), as long as every box uses the same one.
+</p>
+
+<section class="panel">
+    <h2>Facing a bet: should I call?</h2>
+
+    <div class="fields">
+        <label class="field">Pot before the bet
+            <input type="number" min="0" step="any" @bind="_pot" />
+        </label>
+        <label class="field">Bet to call
+            <input type="number" min="0" step="any" @bind="_bet" />
+        </label>
+    </div>
+
+    <div class="stats">
+        <div><span>Pot odds</span><strong>@PotMath.PotOddsRatio(_pot, _bet).ToString("0.##") : 1</strong></div>
+        <div><span>Equity needed</span><strong>@CardText.Percent(RequiredEquity)</strong></div>
+    </div>
+
+    <div class="segmented">
+        <button type="button" class="@(_useOuts ? "" : "on")" @onclick="() => _useOuts = false">I know my equity</button>
+        <button type="button" class="@(_useOuts ? "on" : "")" @onclick="() => _useOuts = true">Count my outs</button>
+    </div>
+
+    <div class="fields">
+        @if (_useOuts)
+        {
+            <label class="field">Outs
+                <input type="number" min="0" max="47" step="1" @bind="_outs" />
+            </label>
+            <label class="field">Street
+                <select @bind="_street">
+                    <option value="flop2">Flop, seeing turn and river</option>
+                    <option value="flop1">Flop, seeing the turn only</option>
+                    <option value="turn">Turn, seeing the river</option>
+                </select>
+            </label>
+        }
+        else
+        {
+            <label class="field">My equity (%)
+                <input type="number" min="0" max="100" step="any" @bind="_equityPercent" />
+            </label>
+        }
+    </div>
+
+    @if (_useOuts)
+    {
+        <p class="hint">
+            @_outs outs is @CardText.Percent(Equity) exactly. The 2-and-4 shortcut says @CardText.Percent(PotMath.RuleOfTwoAndFour(_outs, CardsToCome), 0).
+            @if (_street == "flop2")
+            {
+                <text>The two-card figure assumes you get to see both cards without paying again.</text>
+            }
+        </p>
+    }
+
+    <div class="verdict @(CallEv >= 0 ? "good" : "bad")">
+        <strong>@(CallEv >= 0 ? "Calling is profitable" : "Calling loses money")</strong>
+        <span>
+            EV of calling: @SignedAmount(CallEv).
+            You have @CardText.Percent(Equity) and need @CardText.Percent(RequiredEquity).
+        </span>
+        @if (CallEv < 0 && Equity > 0)
+        {
+            <span>
+                To break even you would need to win about @ImpliedOdds.ToString("0.##") more on later streets when you hit (implied odds).
+            </span>
+        }
+    </div>
+</section>
+
+<section class="panel">
+    <h2>Betting or bluffing</h2>
+
+    <div class="fields">
+        <label class="field">Pot
+            <input type="number" min="0" step="any" @bind="_bluffPot" />
+        </label>
+        <label class="field">My bet
+            <input type="number" min="0" step="any" @bind="_bluffBet" />
+        </label>
+    </div>
+
+    <div class="stats">
+        <div>
+            <span>A pure bluff must work</span>
+            <strong>@CardText.Percent(PotMath.BluffBreakEven(_bluffPot, _bluffBet))</strong>
+            <small>of the time to break even</small>
+        </div>
+        <div>
+            <span>Opponent must continue</span>
+            <strong>@CardText.Percent(PotMath.MinimumDefenseFrequency(_bluffPot, _bluffBet))</strong>
+            <small>minimum defense frequency</small>
+        </div>
+    </div>
+
+    <div class="fields">
+        <label class="field">How often they fold (%)
+            <input type="number" min="0" max="100" step="any" @bind="_foldPercent" />
+        </label>
+        <label class="field">My equity when called (%)
+            <input type="number" min="0" max="100" step="any" @bind="_calledEquityPercent" />
+        </label>
+    </div>
+
+    <div class="verdict @(BetEv >= 0 ? "good" : "bad")">
+        <strong>@(BetEv >= 0 ? "The bet is profitable" : "The bet loses money")</strong>
+        <span>EV of betting: @SignedAmount(BetEv), with these fold and equity estimates.</span>
+    </div>
+</section>
+
+<section class="panel">
+    <h2>Common draws</h2>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Draw</th>
+                <th>Outs</th>
+                <th>Turn only</th>
+                <th>River only</th>
+                <th>Turn and river</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach ((string name, int outs) in CommonDraws)
+            {
+                <tr>
+                    <td>@name</td>
+                    <td>@outs</td>
+                    <td>@CardText.Percent(PotMath.OutsToEquity(outs, 1, 47))</td>
+                    <td>@CardText.Percent(PotMath.OutsToEquity(outs, 1, 46))</td>
+                    <td>@CardText.Percent(PotMath.OutsToEquity(outs, 2, 47))</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+    <p class="hint">Outs only count if hitting them actually wins. Discount outs that could give an opponent a better hand.</p>
+</section>
+
+@code {
+    // Facing a bet
+    private double _pot = 100;
+    private double _bet = 50;
+    private bool _useOuts;
+    private double _equityPercent = 30;
+    private int _outs = 9;
+    private string _street = "flop2";
+
+    // Betting
+    private double _bluffPot = 100;
+    private double _bluffBet = 75;
+    private double _foldPercent = 40;
+    private double _calledEquityPercent = 20;
+
+    private static readonly (string Name, int Outs)[] CommonDraws =
+    {
+        ("Pocket pair to a set", 2),
+        ("Gutshot straight draw", 4),
+        ("Two overcards", 6),
+        ("Open-ended straight draw", 8),
+        ("Flush draw", 9),
+        ("Flush draw + gutshot", 12),
+        ("Flush draw + open-ender", 15)
+    };
+
+    private int CardsToCome => _street == "flop2" ? 2 : 1;
+
+    private int UnseenCards => _street == "turn" ? 46 : 47;
+
+    private double Equity => _useOuts
+        ? PotMath.OutsToEquity(_outs, CardsToCome, UnseenCards)
+        : Math.Clamp(_equityPercent, 0, 100) / 100;
+
+    private double RequiredEquity => PotMath.RequiredEquity(_pot, _bet);
+
+    private double CallEv => PotMath.CallEv(Equity, _pot, _bet);
+
+    private double ImpliedOdds => PotMath.ImpliedOddsNeeded(Equity, _pot, _bet);
+
+    private double BetEv => PotMath.BetEv(
+        _bluffPot,
+        _bluffBet,
+        Math.Clamp(_foldPercent, 0, 100) / 100,
+        Math.Clamp(_calledEquityPercent, 0, 100) / 100);
+
+    private static string SignedAmount(double value)
+        => (value >= 0 ? "+" : "−") + Math.Abs(value).ToString("0.##");
+}

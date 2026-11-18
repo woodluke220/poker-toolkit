@@ -1,0 +1,82 @@
+@* The 13x13 range grid. Click or tap a cell to toggle it; with a mouse, hold and drag to paint. *@
+
+<div class="@(Compact ? "range-grid compact" : "range-grid")" @onpointerup="StopPainting" @onpointerleave="StopPainting">
+    @for (int row = 0; row < HandRange.GridSize; row++)
+    {
+        for (int col = 0; col < HandRange.GridSize; col++)
+        {
+            int r = row, c = col;
+
+            <div class="@CellClass(r, c)" title="@CellTitle(r, c)"
+                 @onpointerdown="e => StartPainting(e, r, c)"
+                 @onpointerenter="() => PaintOver(r, c)"
+                 @onclick="() => Toggle(r, c)">
+                @HandRange.CellName(r, c)
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public HandRange Range { get; set; } = default!;
+
+    /// <summary>Raised after any cell changes.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    /// <summary>A smaller grid for use inside other panels.</summary>
+    [Parameter] public bool Compact { get; set; }
+
+    private bool _painting;
+    private bool _paintValue;
+
+    private bool _skipNextClick;
+
+    private async Task StartPainting(PointerEventArgs e, int row, int col)
+    {
+        // Only a mouse paints. Touch and pen go through Toggle instead, so that
+        // scrolling the page with a finger doesn't select cells on the way past.
+        if (e.PointerType != "mouse") return;
+
+        // The first cell decides whether this drag is selecting or clearing.
+        _painting = true;
+        _paintValue = !Range[row, col];
+        Range[row, col] = _paintValue;
+
+        // The browser sends a click after the mouse button comes up; it's already handled.
+        _skipNextClick = true;
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task Toggle(int row, int col)
+    {
+        if (_skipNextClick)
+        {
+            _skipNextClick = false;
+            return;
+        }
+
+        Range[row, col] = !Range[row, col];
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task PaintOver(int row, int col)
+    {
+        if (!_painting || Range[row, col] == _paintValue) return;
+        Range[row, col] = _paintValue;
+        await OnChanged.InvokeAsync();
+    }
+
+    private void StopPainting() => _painting = false;
+
+    private string CellClass(int row, int col)
+    {
+        string kind = row == col ? "pair" : row < col ? "suited" : "offsuit";
+        return Range[row, col] ? $"cell {kind} on" : $"cell {kind}";
+    }
+
+    private static string CellTitle(int row, int col)
+    {
+        string equity = CardText.Percent(PreflopEquity.Get(row, col));
+        return $"{HandRange.CellName(row, col)}: {HandRange.CellCombos(row, col)} combos, {equity} vs a random hand";
+    }
+}

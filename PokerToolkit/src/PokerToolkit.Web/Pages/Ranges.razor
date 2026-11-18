@@ -1,0 +1,158 @@
+@page "/ranges"
+@inject RangeStore Store
+
+<PageTitle>Ranges · Poker Toolkit</PageTitle>
+
+<h1>Range editor</h1>
+<p class="lede">
+    Build a range on the grid, by typing it, or with the slider. Saved ranges show up in the equity calculator.
+</p>
+
+<div class="range-layout">
+    <div>
+        <RangeGrid Range="_range" OnChanged="GridChanged" />
+        <div class="legend">
+            <span><i class="swatch pair"></i> Pairs</span>
+            <span><i class="swatch suited"></i> Suited</span>
+            <span><i class="swatch offsuit"></i> Offsuit</span>
+            <span class="hint">Hover a hand to see its equity against a random hand.</span>
+        </div>
+    </div>
+
+    <div class="range-side">
+        <section class="panel">
+            <div class="stats">
+                <div><span>Combos</span><strong>@_range.ComboCount</strong><small>of 1,326</small></div>
+                <div><span>Share of hands</span><strong>@_range.Percent.ToString("F1")%</strong></div>
+            </div>
+
+            <label class="field">
+                Strongest @_topPercent.ToString("0.#")% of hands
+                <input type="range" min="0" max="100" step="0.5"
+                       value="@_topPercent.ToString(CultureInfo.InvariantCulture)" @oninput="SliderMoved" />
+            </label>
+            <p class="hint">Ranked by all-in equity against one random hand.</p>
+
+            <label class="field">
+                Notation
+                <textarea rows="3" value="@_text" placeholder="e.g. TT+, AQs+, KQs, AKo"
+                          @onchange="e => TextChanged(e.Value?.ToString())"></textarea>
+            </label>
+            @if (_error is not null)
+            {
+                <p class="error">@_error</p>
+            }
+
+            <div class="actions">
+                <button type="button" class="btn" @onclick="Clear">Clear</button>
+                <button type="button" class="btn" @onclick="SelectAll">Select all</button>
+            </div>
+        </section>
+
+        <section class="panel">
+            <h2>Saved ranges</h2>
+            <div class="range-row">
+                <input class="text-input" placeholder="Name, e.g. Button open" @bind="_saveName" aria-label="Name for this range" />
+                <button type="button" class="btn primary" disabled="@(string.IsNullOrWhiteSpace(_saveName) || _range.IsEmpty)" @onclick="SaveAsync">Save</button>
+            </div>
+
+            @if (_saved.Count == 0)
+            {
+                <p class="hint">Nothing saved yet.</p>
+            }
+            else
+            {
+                <ul class="saved-list">
+                    @foreach (KeyValuePair<string, string> saved in _saved)
+                    {
+                        string name = saved.Key;
+                        string notation = saved.Value;
+                        <li>
+                            <button type="button" class="link name" @onclick="() => Load(name, notation)">@name</button>
+                            <span class="hint">@notation</span>
+                            <button type="button" class="link" @onclick="() => DeleteAsync(name)">Delete</button>
+                        </li>
+                    }
+                </ul>
+            }
+        </section>
+    </div>
+</div>
+
+@code {
+    private readonly HandRange _range = new();
+    private SortedDictionary<string, string> _saved = new();
+
+    private string _text = "";
+    private string? _error;
+    private double _topPercent;
+    private string _saveName = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _saved = await Store.LoadAsync();
+    }
+
+    private void GridChanged()
+    {
+        _text = _range.ToString();
+        _topPercent = Math.Round(_range.Percent * 2) / 2;
+        _error = null;
+    }
+
+    private void SliderMoved(ChangeEventArgs e)
+    {
+        if (!double.TryParse(e.Value?.ToString(), NumberStyles.Float, CultureInfo.InvariantCulture, out double percent))
+            return;
+
+        _range.CopyFrom(HandRange.TopPercent(percent));
+        _text = _range.ToString();
+        _topPercent = percent;
+        _error = null;
+    }
+
+    private void TextChanged(string? text)
+    {
+        _text = text ?? "";
+        if (HandRange.TryParse(text, out HandRange parsed, out string? error))
+        {
+            _range.CopyFrom(parsed);
+            _topPercent = Math.Round(_range.Percent * 2) / 2;
+            _error = null;
+        }
+        else
+        {
+            _error = error;
+        }
+    }
+
+    private void Clear()
+    {
+        _range.Clear();
+        GridChanged();
+    }
+
+    private void SelectAll()
+    {
+        _range.SelectAll();
+        GridChanged();
+    }
+
+    private void Load(string name, string notation)
+    {
+        _saveName = name;
+        TextChanged(notation);
+        _text = _range.ToString();
+    }
+
+    private async Task SaveAsync()
+    {
+        await Store.SaveAsync(_saveName, _range.ToString());
+        _saveName = "";
+    }
+
+    private async Task DeleteAsync(string name)
+    {
+        await Store.DeleteAsync(name);
+    }
+}
