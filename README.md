@@ -1,62 +1,77 @@
 # Poker Toolkit
 
-A study tool for No-Limit Texas Hold'em, written in C#. It runs entirely in the browser (Blazor WebAssembly), so it works on a laptop or a phone with nothing to install and no server.
+A No-Limit Texas Hold'em study tool built in C# and Blazor WebAssembly. Calculate hand equity, build preflop ranges, and work through pot odds and EV, all in the browser.
 
-## What it does
+[![Test and deploy](https://github.com/woodluke220/poker-toolkit/actions/workflows/deploy.yml/badge.svg)](https://github.com/woodluke220/poker-toolkit/actions/workflows/deploy.yml)
 
-**Equity calculator.** Give each player (2 to 6) either two specific cards or a range, add a flop, turn or river if you want, and get each player's win %, tie % and overall equity. Small problems are solved exactly by dealing every possible board. Large ones are simulated, with the margin of error shown.
+**[Try it live →](https://woodluke220.github.io/poker-toolkit/)**
 
-**Range editor.** The standard 13×13 grid. Click or drag to select hands, type notation such as `TT+, AQs+, KQs, AKo`, or use a slider to take the strongest X% of hands. Shows the combo count and share of all hands. Ranges can be named and saved, and saved ranges appear in the equity calculator.
+![Equity calculator showing pocket aces against pocket kings](docs/equity.png)
 
-**Pot odds and EV.** Required equity and EV for a call (from a known equity or by counting outs), the implied odds needed when a call is short, break-even bluff frequency, minimum defense frequency, and the EV of a bet given how often it gets folds.
+## Why I built this
+
+I play a lot of poker with friends, and the more I played, the more I wanted to understand what was going on underneath the cards. The deeper I dug, the clearer it became that strong players aren't guessing. They know their odds, they know what the pot is offering them, and they know when a bet makes sense and when to let a hand go.
+
+I wanted a tool that shows me those numbers so I can start building the same instincts. It also gave me a good excuse to write something real in C#.
+
+## Features
+
+**Equity calculator.** Give each player (2 to 6) a specific hand or a range, add a flop, turn or river, and see each player's win, tie and overall equity. Small spots are solved exactly by checking every possible board. Bigger ones are simulated, and the margin of error is shown alongside the result.
+
+**Range editor.** The standard 13×13 grid. Select hands by clicking or dragging, type standard notation like `TT+, AQs+, KQs, AKo`, or use a slider to take the strongest X% of hands. Ranges can be saved by name and reused in the equity calculator.
+
+**Pot odds and EV.** Shows the equity you need to call, the expected value of calling (from a known equity or by counting outs), the implied odds you'd need when a call comes up short, and how often a bluff has to work to break even.
 
 ## How it works
 
-The solution has three projects:
+The project is split into three parts:
 
-| Project | What it is |
+| Project | Purpose |
 | --- | --- |
-| `src/PokerToolkit.Engine` | Class library with all the poker logic. No UI and no dependencies. |
-| `src/PokerToolkit.Web` | Blazor WebAssembly front end that calls the engine. |
+| `src/PokerToolkit.Engine` | All of the poker logic. A plain C# class library with no UI and no dependencies. |
+| `src/PokerToolkit.Web` | The Blazor WebAssembly front end. |
 | `tests/PokerToolkit.Engine.Tests` | xUnit tests for the engine. |
 
-A few design points:
+**Hands are stored as bitmasks.** Each card is a single bit in a 64-bit integer, with 16 bits set aside for each suit. Combining cards is just a bitwise OR, so a seven-card hand is still one number.
 
-- **Hands are bitmasks.** Each card is one bit in a 64-bit integer, 16 bits per suit. A seven-card hand is seven cards OR-ed together.
-- **The evaluator doesn't sort or loop over cards.** Questions like "which ranks appear in all four suits?" are a handful of AND/OR operations on the four suit masks. The result is a single `int` where a bigger number is always the better hand, so comparing hands is comparing integers.
-- **Two equity methods.** Exact enumeration walks every remaining board (and every hand in a range). Monte Carlo deals random hands and boards. The calculator estimates the size of the exact job first and only simulates when it is too big.
-- **Simulation runs in batches.** WebAssembly in the browser is single-threaded, so the page runs a couple of thousand deals, redraws, and repeats. The numbers settle on screen and the run can be stopped.
-- **Range-vs-range sampling is unbiased.** When two sampled hands share a card the whole deal is redrawn, which keeps every valid deal equally likely.
+**The hand evaluator doesn't sort anything.** It splits the hand into four suit masks and answers questions with bitwise operations. ANDing all four suits finds four of a kind, a population count finds flushes, and a sliding five-bit window finds straights. The result is a single integer with the hand category in the high bits and the ranks below it, so comparing two hands is just comparing two numbers. That matters when a simulation evaluates millions of hands.
 
-### Testing
+**Equity is calculated two ways.** Exact enumeration deals out every remaining board and counts the results. When that would take too long (preflop, or with wide ranges), the calculator switches to a Monte Carlo simulation and reports a 95% margin of error. The simulation runs in small batches so the page stays responsive and you can watch the numbers settle.
 
-The tests include one that deals all 2,598,960 five-card hands and checks the count in every category (40 straight flushes, 624 four-of-a-kinds, and so on) against the known totals. Equity results are checked against exact enumeration.
+**The tests check the evaluator against known results.** One test deals all 2,598,960 possible five-card hands and confirms the count for every category: 40 straight flushes, 624 four of a kinds, and so on.
 
-## Running it
+## What I've learned
 
-You need the [.NET 10 SDK](https://dotnet.microsoft.com/download).
+The biggest takeaway is how much of poker is math, and how quickly good players have to do it. The pot odds page compares the "rule of 2 and 4" shortcut players use at the table with the exact probability, and seeing how close the shortcut gets explains why everyone uses it.
+
+On the programming side, working through the evaluator taught me how much speed you can get from representing data the right way. Swapping a sorted list of cards for a few integers turns a lot of comparison logic into a handful of bitwise operations.
+
+## Built with AI assistance
+
+I used Claude, an AI assistant, as a development tool on this project. It scaffolded the core engine and the first version of the interface. I've gone through that code to understand how each piece works, and I'm building the next major feature, the hand-history analyzer, myself.
+
+## Running it locally
+
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 
 ```bash
-# run the tests
-dotnet test
-
-# start the app, then open the address it prints
-dotnet run --project src/PokerToolkit.Web
+dotnet test                                   # run the tests
+dotnet run --project src/PokerToolkit.Web     # start the app
 ```
 
-In VS Code, install the C# Dev Kit extension and open this folder.
-
-## Publishing it
-
-`.github/workflows/deploy.yml` tests and deploys the app to GitHub Pages on every push to `main`. After pushing the repository, turn it on once under **Settings → Pages → Source: GitHub Actions**. The app is then served at `https://<your-username>.github.io/<repository-name>/`.
+Pushing to `main` runs the tests and deploys the app to GitHub Pages automatically.
 
 ## Roadmap
 
-- Hand-history analyzer: import hand histories and report VPIP, PFR, win rate and common leaks
-- Weighted ranges (play a hand some fraction of the time)
-- Hand-category breakdown per player (how often each makes a flush, set, and so on)
-- Ahead-of-time compilation for faster simulation in the browser
+- [ ] **Hand-history analyzer** (in progress): import hand histories and report VPIP, PFR, win rate and common leaks
+- [ ] Weighted ranges, for hands played only part of the time
+- [ ] A breakdown of how often each player makes each type of hand
+- [ ] Faster simulation through ahead-of-time compilation
 
 ## A note on use
 
-This is for studying away from the table. Most online poker sites prohibit using calculators like this while a hand is in progress.
+This is meant for studying away from the table. Most online poker sites don't allow tools like this during a hand.
+
+---
+
+Built by Luke Wood, University of Missouri.
